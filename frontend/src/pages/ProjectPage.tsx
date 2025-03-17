@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Container, 
   Typography, 
@@ -13,25 +13,64 @@ import { useParams } from 'react-router-dom';
 import { websiteService } from '../services/websiteService';
 import { Website } from '../types/Website';
 
-const ProjectPage: React.FC = () => {
-  const { id } = useParams();
-  const [url, setUrl] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [scrapedData, setScrapedData] = useState<Website | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
+// Add a simple logger utility at the top of the file
+const logger = {
+  info: (message: string, data?: any) => {
+    console.log(`[INFO] ${message}`, data || '');
+  },
+  error: (message: string, error?: any) => {
+    console.error(`[ERROR] ${message}`, error || '');
+  }
+};
 
+/**
+ * ProjectPage Component
+ * Handles website scraping and summarization functionality
+ * Route: /project/scrapeme
+ */
+const ProjectPage: React.FC = () => {
+  // Get the project ID from URL parameters
+  const { id } = useParams();
+
+  // State management for form inputs and API responses
+  const [url, setUrl] = useState(''); // Store the input URL
+  const [loading, setLoading] = useState(false); // Loading state for scraping
+  const [scrapedData, setScrapedData] = useState<Website | null>(null); // Store scraped website data
+  const [error, setError] = useState<string | null>(null); // Error handling state
+  const [summary, setSummary] = useState<string | null>(null); // Store the AI-generated summary
+  const [summaryLoading, setSummaryLoading] = useState(false); // Loading state for summary generation
+
+  // Add logging on component mount
+  useEffect(() => {
+    logger.info('ProjectPage mounted', { projectId: id });
+  }, [id]);
+
+  /**
+   * Handle website scraping
+   * 1. Validates URL format
+   * 2. Calls the scraping API
+   * 3. Updates UI with results or error
+   */
   const handleScrape = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     
+    logger.info('Starting website scrape', { url });
+    
     try {
       const urlObject = new URL(url);
-      const data = await websiteService.scrapeWebsite(url);
+      logger.info('URL validated', { href: urlObject.href });
+      
+      const data = await websiteService.scrapeWebsite(urlObject.href);
+      logger.info('Website scraped successfully', { 
+        title: data.title,
+        contentLength: data.text.length 
+      });
+      
       setScrapedData(data);
     } catch (err) {
+      logger.error('Scraping failed', err);
       if (err instanceof Error) {
         setError(err.message);
       } else {
@@ -42,16 +81,32 @@ const ProjectPage: React.FC = () => {
     }
   };
 
+  /**
+   * Handle summary generation using OpenAI
+   * Only available after successful website scraping
+   */
   const handleGetSummary = async () => {
-    if (!scrapedData) return;
+    if (!scrapedData) {
+      logger.error('Attempted to get summary without scraped data');
+      return;
+    }
     
     setSummaryLoading(true);
     setError(null);
     
+    logger.info('Starting summary generation', { 
+      url: scrapedData.url,
+      contentLength: scrapedData.text.length 
+    });
+    
     try {
       const summaryText = await websiteService.getSummary(scrapedData.url);
+      logger.info('Summary generated successfully', { 
+        summaryLength: summaryText.length 
+      });
       setSummary(summaryText);
     } catch (err) {
+      logger.error('Summary generation failed', err);
       if (err instanceof Error) {
         setError(err.message);
       } else {
@@ -62,10 +117,12 @@ const ProjectPage: React.FC = () => {
     }
   };
 
+  // Only render for the 'scrapeme' project
   if (id !== 'scrapeme') return null;
 
   return (
     <Container sx={{ py: 4 }}>
+      {/* Page Header */}
       <Typography variant="h2" gutterBottom>
         ScrapeMe
       </Typography>
@@ -73,6 +130,7 @@ const ProjectPage: React.FC = () => {
         Website Scraping Project
       </Typography>
 
+      {/* URL Input Form */}
       <Paper sx={{ p: 3, my: 3 }}>
         <form onSubmit={handleScrape}>
           <TextField
@@ -84,7 +142,9 @@ const ProjectPage: React.FC = () => {
             placeholder="https://example.com"
             sx={{ mb: 2 }}
           />
+          {/* Action Buttons */}
           <Stack direction="row" spacing={2}>
+            {/* Scrape Button - Disabled while loading or no URL */}
             <Button 
               variant="contained" 
               type="submit" 
@@ -92,6 +152,7 @@ const ProjectPage: React.FC = () => {
             >
               {loading ? <CircularProgress size={24} /> : 'Scrape Website'}
             </Button>
+            {/* Summary Button - Only enabled after successful scrape */}
             <Button
               variant="outlined"
               onClick={handleGetSummary}
@@ -103,6 +164,7 @@ const ProjectPage: React.FC = () => {
         </form>
       </Paper>
 
+      {/* Error Display Section */}
       {error && (
         <Paper 
           sx={{ 
@@ -126,6 +188,7 @@ const ProjectPage: React.FC = () => {
         </Paper>
       )}
 
+      {/* AI Summary Display Section */}
       {summary && (
         <Paper sx={{ p: 3, my: 3 }}>
           <Typography variant="h6" gutterBottom>
@@ -143,17 +206,20 @@ const ProjectPage: React.FC = () => {
         </Paper>
       )}
 
+      {/* Scraped Content Display Section */}
       {scrapedData && (
         <Paper sx={{ p: 3, my: 3 }}>
           <Typography variant="h6" gutterBottom>
             Scraped Content
           </Typography>
+          {/* Website Title */}
           <Box sx={{ mb: 2 }}>
             <Typography variant="subtitle1" fontWeight="bold">
               Title:
             </Typography>
             <Typography>{scrapedData.title}</Typography>
           </Box>
+          {/* Website Content */}
           <Box>
             <Typography variant="subtitle1" fontWeight="bold">
               Content:

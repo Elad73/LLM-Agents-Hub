@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pydantic_settings import BaseSettings
 
+
 class Settings(BaseSettings):
     OPENAI_API_KEY: str
     DEFAULT_LLM_PROVIDER: str = "openai"

@@ -14,7 +14,8 @@ openai>=1.0.0
 # Optional but recommended
 python-multipart>=0.0.5
 
-pydantic==2.6.1
+pydantic==2.10.6
+pydantic-settings==2.8.1
 httpx==0.26.0
 email-validator==2.1.0.post1
 ujson==5.9.0 
