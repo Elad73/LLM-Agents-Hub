@@ -85,9 +85,11 @@ const ProjectPage: React.FC = () => {
    * Handle summary generation using OpenAI
    * Only available after successful website scraping
    */
-  const handleGetSummary = async () => {
-    if (!scrapedData) {
-      logger.error('Attempted to get summary without scraped data');
+  const handleGetSummary = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scrapedData) {     
+      await handleScrape(e);
+      logger.error('handleScrape(e)');
       return;
     }
     
@@ -95,12 +97,13 @@ const ProjectPage: React.FC = () => {
     setError(null);
     
     logger.info('Starting summary generation', { 
-      url: scrapedData.url,
+      // url: scrapedData.url,
+      url,
       contentLength: scrapedData.text.length 
     });
     
     try {
-      const summaryText = await websiteService.getSummary(scrapedData.url);
+      const summaryText = await websiteService.getSummary(url);
       logger.info('Summary generated successfully', { 
         summaryLength: summaryText.length 
       });
@@ -156,7 +159,7 @@ const ProjectPage: React.FC = () => {
             <Button
               variant="outlined"
               onClick={handleGetSummary}
-              disabled={!scrapedData || summaryLoading}
+              disabled={!url || summaryLoading}
             >
               {summaryLoading ? <CircularProgress size={24} /> : 'Get Summary'}
             </Button>
