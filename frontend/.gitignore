@@ -1,0 +1,47 @@
+### Node modules ###
+node_modules/
+
+### Logs ###
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+### Build directory ###
+build/
+dist/
+
+### Environment variables ###
+.env*
+!.env.example
+
+### Editor and system files ###
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+### Dependency directories ###
+bower_components/
+
+### Temporary files ###
+*.tmp
+
+### Lint and test coverage ###
+.eslintcache
+coverage/
+
+### Miscellaneous ###
+public/*.hot-update.js
+public/*.hot-update.json
+
+### React Native ###
+.expo/
+.expo-shared/
+
+### Next.js ###
+.next/
+
+### TypeScript ###
+*.tsbuildinfo

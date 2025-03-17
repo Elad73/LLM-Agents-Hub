@@ -1,0 +1,48 @@
+### Global ignores ###
+.DS_Store
+Thumbs.db
+*.swp
+.env*
+!.env.example
+
+### Node modules and dependencies ###
+node_modules/
+
+### Logs ###
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+### Build directories ###
+build/
+dist/
+
+### Python ignores ###
+python-services/__pycache__/
+python-services/*.py[cod]
+python-services/*.so
+python-services/venv/
+python-services/.venv/
+python-services/.mypy_cache/
+python-services/.pytest_cache/
+python-services/.tox/
+python-services/.nox/
+python-services/db.sqlite3
+python-services/*.sqlite
+python-services/.coverage
+
+### ReactJS ignores ###
+react-services/node_modules/
+react-services/.eslintcache
+react-services/public/*.hot-update.js
+react-services/public/*.hot-update.json
+react-services/.next/
+
+### Editor and system files ###
+.vscode/
+.idea/
+
+### Jupyter Notebook ###
+python-services/.ipynb_checkpoints/

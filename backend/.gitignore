@@ -1,0 +1,39 @@
+### Python ###
+__pycache__/
+*.py[cod]
+*.so
+
+### Virtual environments ###
+venv/
+.env/
+*.venv
+
+### Logs and databases ###
+*.log
+db.sqlite3
+*.sqlite
+
+### Jupyter Notebook ###
+.ipynb_checkpoints/
+
+### Package files ###
+dist/
+build/
+*.egg-info/
+
+### Pytest and coverage ###
+.coverage
+.tox/
+.nox/
+.pytest_cache/
+
+### MyPy ###
+.mypy_cache/
+
+### VSCode ###
+.vscode/
+
+### Miscellaneous ###
+.DS_Store
+Thumbs.db
+*.swp
