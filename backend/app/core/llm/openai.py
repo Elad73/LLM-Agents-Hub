@@ -27,6 +27,13 @@ Respond in markdown."""
             api_key.startswith("sk-") and 
             api_key.strip() == api_key
         )
+    
+    # See how this function creates exactly the format above
+    def messages_for(self, website_title: str, website_content: str):
+        return [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": self._create_user_prompt(website_title, website_content)}
+        ]
 
     async def generate_summary(self, website_title: str, website_content: str) -> str:
         if not self.client:
@@ -39,10 +46,7 @@ Respond in markdown."""
             
             response = await self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": self._create_user_prompt(website_title, website_content)}
-                ]
+                messages=self.messages_for(website_title, website_content)
             )
             
             logger.info(f"Response.choices: {response.choices}")

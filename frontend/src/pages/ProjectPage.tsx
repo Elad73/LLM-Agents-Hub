@@ -12,6 +12,7 @@ import {
 import { useParams } from 'react-router-dom';
 import { websiteService } from '../services/websiteService';
 import { Website } from '../types/Website';
+import ReactMarkdown from "react-markdown"
 
 // Add a simple logger utility at the top of the file
 const logger = {
@@ -197,18 +198,18 @@ const ProjectPage: React.FC = () => {
           <Typography variant="h6" gutterBottom>
             Website Summary
           </Typography>
-          <Typography 
-            sx={{ 
+          <Typography
+            sx={{
               whiteSpace: 'pre-wrap',
               maxHeight: '400px',
               overflow: 'auto'
             }}
           >
-            {summary}
+            <ReactMarkdown>{summary}</ReactMarkdown>
           </Typography>
         </Paper>
       )}
-
+    
       {/* Scraped Content Display Section */}
       {scrapedData && (
         <Paper sx={{ p: 3, my: 3 }}>
