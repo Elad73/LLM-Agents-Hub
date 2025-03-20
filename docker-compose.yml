@@ -10,30 +10,50 @@ services:
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - PYTHONMALLOC=malloc
+      - PYTHONDONTWRITEBYTECODE=1  # Prevent Python from writing .pyc files
+      - LOG_LEVEL=debug
+    command: >
+      uvicorn app.main:app 
+      --host 0.0.0.0 
+      --port 8000 
+      --log-level debug
+      --limit-concurrency 50
+      --limit-max-requests 1000
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
+          cpus: '1.0'
         reservations:
           memory: 512M
+          cpus: '0.5'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build: ./frontend
     ports:
       - "3000:3000"
     volumes:
-      - ./frontend:/app:cached
+      - ./frontend:/app
       - /app/node_modules
     environment:
       - REACT_APP_API_URL=http://localhost:8000
       - WDS_SOCKET_PORT=0
       - CHOKIDAR_USEPOLLING=true
+      - CI=true
+    stdin_open: true
+    tty: true
     deploy:
       resources:
         limits:
@@ -42,4 +62,9 @@ services:
           memory: 512M
     depends_on:
       backend:
-        condition: service_healthy 
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3 

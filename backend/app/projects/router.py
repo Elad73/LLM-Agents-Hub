@@ -6,13 +6,34 @@ from ..core.website import Website
 from ..core.llm.factory import LLMFactory
 from ..core.config import get_settings
 import logging
+from logging.handlers import RotatingFileHandler
+import sys
 from datetime import datetime
 
 router = APIRouter()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure logging with more detailed settings
+def setup_logger():
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)  # Set to DEBUG level to catch all logs
+
+    # Console Handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.DEBUG)
+    console_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(console_format)
+    
+    # Clear any existing handlers to avoid duplication
+    logger.handlers.clear()
+    logger.addHandler(console_handler)
+    
+    # Prevent logger from propagating to root logger
+    logger.propagate = False
+    
+    return logger
+
+# Initialize logger
+logger = setup_logger()
 
 # Sample projects data
 projects = [
@@ -28,10 +49,14 @@ class ScrapeRequest(BaseModel):
     url: HttpUrl  # This validates the URL format
 
 class WebsiteRequest(BaseModel):
-    url: str  # Changed from HttpUrl to str to match frontend request
+    url: str
+    source: str
 
 class WebsiteSummaryResponse(BaseModel):
     summary: str
+
+class FileRequest(BaseModel):
+    path: str
 
 @router.get("/", response_model=List[Project])
 async def get_projects():
@@ -46,47 +71,64 @@ async def get_project(project_id: int):
 
 @router.post("/scrape")
 async def scrape_website(request: WebsiteRequest):
+    logger.info("Starting website scraping")
+    logger.debug(f"Received request: {request}")
+    
     try:
+        logger.info(f"Attempting to scrape URL: {request.url}")
         website = Website(request.url)
-        return website.to_dict()
+        logger.info(f"Successfully created website object: {website}")
+        result = website.to_dict()
+        logger.info(f"Returning scraped data: {result}")
+        return result
     except Exception as e:
-        print(f"Scraping error: {str(e)}")  # Add logging
+        logger.error(f"Scraping failed: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/summarize", response_model=WebsiteSummaryResponse)
 async def summarize_website(request: WebsiteRequest):
     start_time = datetime.now()
-    logger.info(f"Starting website summarization for URL: {request.url}")
     
     try:
-        # Create website object
-        logger.info("Fetching website content")
-        website = Website(request.url)
-        
-        # Log website details
-        logger.info(f"Website fetched successfully. Title: {website.title[:50]}...")
-        logger.info(f"Content length: {len(website.text)} characters")
-        
-        # Get LLM provider
+        if request.source == "file":
+            # Create website object from content
+            website = Website.from_content("local_file", request.url)
+        else:
+            # Create website object from URL
+            website = Website(request.url)
+
+        logger.info(f"website: {website}")    
+        # Rest of the summarization logic remains the same
         settings = get_settings()
-        logger.info(f"Using LLM provider: {settings.DEFAULT_LLM_PROVIDER}")
+        logger.info(f"settings: {settings}")
         llm_provider = LLMFactory.create(settings.DEFAULT_LLM_PROVIDER)
-        
-        # Generate summary
-        logger.info("Generating summary using LLM")
+        logger.info(f"llm_provider: {llm_provider}")
         summary = await llm_provider.generate_summary(website.title, website.text)
-        
-        # Log summary details
-        logger.info(f"Summary generated successfully. Length: {len(summary)} characters")
-        
-        # Calculate and log processing time
-        processing_time = (datetime.now() - start_time).total_seconds()
-        logger.info(f"Total processing time: {processing_time:.2f} seconds")
+        logger.info(f"summary: {summary}")
         
         return WebsiteSummaryResponse(summary=summary)
         
     except Exception as e:
         logger.error(f"Error during summarization: {str(e)}", exc_info=True)
-        processing_time = (datetime.now() - start_time).total_seconds()
-        logger.error(f"Failed after {processing_time:.2f} seconds")
-        raise HTTPException(status_code=400, detail=str(e)) 
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/scrape-file")
+async def scrape_file(request: FileRequest):
+    try:
+        with open(request.path, 'r', encoding='utf-8') as file:
+            content = file.read()
+            
+        # Create a Website object from the file content
+        website = Website.from_content(request.path, content)
+        return website.to_dict()
+    except Exception as e:
+        logger.error(f"File scraping error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/test-logging")
+async def test_logging():
+    logger.debug("This is a debug message")
+    logger.info("This is an info message")
+    logger.warning("This is a warning message")
+    logger.error("This is an error message")
+    return {"message": "Logging test completed"} 

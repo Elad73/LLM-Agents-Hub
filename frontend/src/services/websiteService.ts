@@ -26,7 +26,7 @@ export const websiteService = {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, source: 'web' }),
       });
 
       if (!response.ok) {
@@ -43,14 +43,17 @@ export const websiteService = {
     }
   },
 
-  getSummary: async (url: string): Promise<string> => {
+  getSummary: async (urlOrContent: string, source: string): Promise<string> => {
     try {
       const response = await fetch(`${API_URL}/summarize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ 
+          url: urlOrContent,
+          source
+        }),
       });
 
       if (!response.ok) {
@@ -66,5 +69,29 @@ export const websiteService = {
       }
       throw new Error('Failed to get summary');
     }
-  }
+  },
+
+  scrapeFile: async (filePath: string): Promise<Website> => {
+    try {
+      const response = await fetch(`${API_URL}/scrape-file`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path: filePath }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(errorData || 'Failed to scrape file');
+      }
+
+      return await response.json();
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(error.message);
+      }
+      throw new Error('Failed to scrape file');
+    }
+  },
 }; 

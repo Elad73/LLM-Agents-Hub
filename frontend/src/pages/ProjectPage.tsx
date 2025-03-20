@@ -7,20 +7,27 @@ import {
   Paper,
   Box,
   CircularProgress,
-  Stack
+  Stack,
+  IconButton,
+  InputAdornment
 } from '@mui/material';
 import { useParams } from 'react-router-dom';
 import { websiteService } from '../services/websiteService';
 import { Website } from '../types/Website';
 import ReactMarkdown from "react-markdown"
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import mammoth from 'mammoth';
 
-// Add a simple logger utility at the top of the file
+// Enhanced logger utility
 const logger = {
   info: (message: string, data?: any) => {
-    console.log(`[INFO] ${message}`, data || '');
+    console.log(`[INFO][ProjectPage] ${message}`, data || '');
   },
   error: (message: string, error?: any) => {
-    console.error(`[ERROR] ${message}`, error || '');
+    console.error(`[ERROR][ProjectPage] ${message}`, error || '');
+  },
+  debug: (message: string, data?: any) => {
+    console.debug(`[DEBUG][ProjectPage] ${message}`, data || '');
   }
 };
 
@@ -34,92 +41,223 @@ const ProjectPage: React.FC = () => {
   const { id } = useParams();
 
   // State management for form inputs and API responses
-  const [url, setUrl] = useState(''); // Store the input URL
-  const [loading, setLoading] = useState(false); // Loading state for scraping
-  const [scrapedData, setScrapedData] = useState<Website | null>(null); // Store scraped website data
-  const [error, setError] = useState<string | null>(null); // Error handling state
-  const [summary, setSummary] = useState<string | null>(null); // Store the AI-generated summary
-  const [summaryLoading, setSummaryLoading] = useState(false); // Loading state for summary generation
+  const [url, setUrl] = useState('');
+  const [source, setSource] = useState<'web' | 'file'>('web');
+  const [loading, setLoading] = useState(false);
+  const [rawScrapedData, setRawScrapedData] = useState<{
+    source: 'web' | 'file';
+    address: string;
+    title: string;
+    text: string;
+    created_at: string;
+    updated_at: string;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Add logging on component mount
+  // Add component lifecycle logging
   useEffect(() => {
-    logger.info('ProjectPage mounted', { projectId: id });
-  }, [id]);
+    logger.info('Component mounted', { 
+      projectId: id,
+      initialSource: source 
+    });
+    
+    return () => {
+      logger.debug('Component unmounting');
+    };
+  }, [id, source]);
 
-  /**
-   * Handle website scraping
-   * 1. Validates URL format
-   * 2. Calls the scraping API
-   * 3. Updates UI with results or error
-   */
-  const handleScrape = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Enhanced file selection handling with logging
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    logger.info('File selection triggered');
+    
+    const file = e.target.files?.[0];
+    if (!file) {
+      logger.debug('No file selected');
+      return;
+    }
+
+    logger.info('File selected', { 
+      name: file.name,
+      size: file.size,
+      type: file.type 
+    });
+
     setLoading(true);
-    setError(null);
-    
-    logger.info('Starting website scrape', { url });
-    
+
     try {
-      const urlObject = new URL(url);
-      logger.info('URL validated', { href: urlObject.href });
-      
-      const data = await websiteService.scrapeWebsite(urlObject.href);
-      logger.info('Website scraped successfully', { 
-        title: data.title,
-        contentLength: data.text.length 
-      });
-      
-      setScrapedData(data);
-    } catch (err) {
-      logger.error('Scraping failed', err);
-      if (err instanceof Error) {
-        setError(err.message);
+      // For .docx files
+      if (file.name.endsWith('.docx')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        const content = result.value; // This contains the text content
+
+        logger.info('DOCX file processed', {
+          fileName: file.name,
+          contentLength: content.length
+        });
+
+        setUrl(file.name);
+        setSource('file');
+        
+        const newData = {
+          source: 'file' as const,
+          address: file.name,
+          title: file.name,
+          text: content,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        setRawScrapedData(newData);
+        logger.info('File data processed successfully', {
+          fileName: file.name,
+          dataLength: content.length
+        });
       } else {
-        setError('Invalid URL format. Please enter a valid URL starting with http:// or https://');
+        setError('Please select a .docx file');
       }
+    } catch (error) {
+      logger.error('Error processing DOCX file', error);
+      setError('Failed to process DOCX file');
     } finally {
       setLoading(false);
     }
   };
 
-  /**
-   * Handle summary generation using OpenAI
-   * Only available after successful website scraping
-   */
-  const handleGetSummary = async (e: React.FormEvent) => {
+  // Enhanced URL change handler with logging
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    logger.debug('URL input changed', { value });
+    
+    setUrl(value);
+    
+    if (!value) {
+      logger.info('Input cleared, resetting to web source');
+      setSource('web');
+      setRawScrapedData(null);
+    } else {
+      try {
+        new URL(value);
+        logger.debug('Valid URL detected, setting source to web');
+        setSource('web');
+      } catch {
+        logger.debug('Invalid URL format, maintaining current source');
+      }
+    }
+  };
+
+  // Enhanced scraping handler with detailed logging
+  const handleScrape = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!scrapedData) {     
-      await handleScrape(e);
-      logger.error('handleScrape(e)');
+    logger.info('Scrape operation started', { 
+      url, 
+      source,
+      hasExistingData: !!rawScrapedData 
+    });
+    
+    if (!url) {
+      logger.error('Scrape attempted without URL');
+      setError('Need to add address for scraping.');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      let data;
+      if (source === 'file') {
+        logger.debug('Processing file source');
+        if (!rawScrapedData) {
+          throw new Error('No file content available');
+        }
+        data = rawScrapedData;
+      } else {
+        logger.debug('Processing web source');
+        const urlObject = new URL(url);
+        logger.info('Initiating web scrape', { url: urlObject.href });
+        
+        const response = await websiteService.scrapeWebsite(urlObject.href);
+        data = {
+          source: 'web' as const,
+          address: urlObject.href,
+          title: response.title,
+          text: response.text,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      }
+      
+      setRawScrapedData(data);
+      logger.info('Scrape completed successfully', {
+        source: data.source,
+        contentLength: data.text.length
+      });
+    } catch (err) {
+      logger.error('Scrape operation failed', err);
+      setError(err instanceof Error ? err.message : 'Failed to scrape content');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Enhanced summary handler with detailed logging
+  const handleSummarize = async (e: React.FormEvent) => {
+    e.preventDefault();
+    logger.info('Summary operation started', {
+      hasUrl: !!url,
+      hasScrapedData: !!rawScrapedData,
+      currentSource: source
+    });
+    
+    if (!url && !rawScrapedData) {
+      logger.error('Summary attempted without data');
+      setError('Need to add address for scraping and then summarizing.');
       return;
     }
     
     setSummaryLoading(true);
     setError(null);
     
-    logger.info('Starting summary generation', { 
-      // url: scrapedData.url,
-      url,
-      contentLength: scrapedData.text.length 
-    });
-    
     try {
-      const summaryText = await websiteService.getSummary(url);
-      logger.info('Summary generated successfully', { 
-        summaryLength: summaryText.length 
+      if (rawScrapedData?.address !== url) {
+        logger.debug('URL mismatch, initiating new scrape');
+        await handleScrape(e);
+      }
+      
+      if (!rawScrapedData) {
+        throw new Error('No content available for summarizing');
+      }
+      
+      logger.info('Requesting summary generation', {
+        contentLength: rawScrapedData.text.length,
+        source: rawScrapedData.source
       });
+      
+      const summaryText = await websiteService.getSummary(rawScrapedData.address, rawScrapedData.source);
       setSummary(summaryText);
+      
+      logger.info('Summary generated successfully', {
+        summaryLength: summaryText.length
+      });
     } catch (err) {
       logger.error('Summary generation failed', err);
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError('Failed to get summary');
-      }
+      setError(err instanceof Error ? err.message : 'Failed to generate summary');
     } finally {
       setSummaryLoading(false);
     }
   };
+
+  // Add render logging
+  logger.debug('Rendering component', { 
+    hasError: !!error,
+    hasScrapedData: !!rawScrapedData,
+    hasSummary: !!summary,
+    currentSource: source
+  });
 
   // Only render for the 'scrapeme' project
   if (id !== 'scrapeme') return null;
@@ -139,30 +277,48 @@ const ProjectPage: React.FC = () => {
         <form onSubmit={handleScrape}>
           <TextField
             fullWidth
-            label="Website URL"
+            label={source === 'file' ? "File Path" : "Website URL"}
             variant="outlined"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com"
+            onChange={handleUrlChange}
+            placeholder={source === 'file' ? "Selected file..." : "https://example.com"}
             sx={{ mb: 2 }}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => fileInputRef.current?.click()}
+                    edge="end"
+                    title="Open local file"
+                  >
+                    <FolderOpenIcon />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
           />
-          {/* Action Buttons */}
+          {/* Hidden file input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+            accept=".docx"
+          />
           <Stack direction="row" spacing={2}>
-            {/* Scrape Button - Disabled while loading or no URL */}
             <Button 
               variant="contained" 
-              type="submit" 
-              disabled={loading || !url}
+              onClick={handleScrape}
+              disabled={loading}
             >
-              {loading ? <CircularProgress size={24} /> : 'Scrape Website'}
+              {loading ? <CircularProgress size={24} /> : 'Scrape Me'}
             </Button>
-            {/* Summary Button - Only enabled after successful scrape */}
             <Button
-              variant="outlined"
-              onClick={handleGetSummary}
-              disabled={!url || summaryLoading}
+              variant="contained"
+              onClick={handleSummarize}
+              disabled={summaryLoading}
             >
-              {summaryLoading ? <CircularProgress size={24} /> : 'Get Summary'}
+              {summaryLoading ? <CircularProgress size={24} /> : 'Summarize Me'}
             </Button>
           </Stack>
         </form>
@@ -196,7 +352,7 @@ const ProjectPage: React.FC = () => {
       {summary && (
         <Paper sx={{ p: 3, my: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Website Summary
+            Summary
           </Typography>
           <Typography
             sx={{
@@ -211,33 +367,25 @@ const ProjectPage: React.FC = () => {
       )}
     
       {/* Scraped Content Display Section */}
-      {scrapedData && (
+      {rawScrapedData && (
         <Paper sx={{ p: 3, my: 3 }}>
           <Typography variant="h6" gutterBottom>
             Scraped Content
           </Typography>
-          {/* Website Title */}
           <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle1" fontWeight="bold">
-              Title:
-            </Typography>
-            <Typography>{scrapedData.title}</Typography>
+            <Typography variant="subtitle2">Source: {rawScrapedData.source}</Typography>
+            <Typography variant="subtitle2">Address: {rawScrapedData.address}</Typography>
+            <Typography variant="subtitle2">Title: {rawScrapedData.title}</Typography>
           </Box>
-          {/* Website Content */}
-          <Box>
-            <Typography variant="subtitle1" fontWeight="bold">
-              Content:
-            </Typography>
-            <Typography 
-              sx={{ 
-                whiteSpace: 'pre-wrap',
-                maxHeight: '400px',
-                overflow: 'auto'
-              }}
-            >
-              {scrapedData.text}
-            </Typography>
-          </Box>
+          <Typography 
+            sx={{ 
+              whiteSpace: 'pre-wrap',
+              maxHeight: '400px',
+              overflow: 'auto'
+            }}
+          >
+            {rawScrapedData.text}
+          </Typography>
         </Paper>
       )}
     </Container>
