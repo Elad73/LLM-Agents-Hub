@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Container, 
   Typography, 
@@ -13,10 +13,23 @@ import {
 } from '@mui/material';
 import { useParams } from 'react-router-dom';
 import { websiteService } from '../services/websiteService';
-import { Website } from '../types/Website';
 import ReactMarkdown from "react-markdown"
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import mammoth from 'mammoth';
+import { scrapeService } from '../services/scrapeService';
+
+const CONFIG = {
+  SUPPORTED_FILE_TYPES: ['.docx'],
+  MAX_DISPLAY_HEIGHT: '400px',
+  UPLOAD_PATH_PREFIX: 'C:/uploads/'
+} as const;
+
+const UI_MESSAGES = {
+  INVALID_FILE: 'Please select a .docx file',
+  PROCESSING_ERROR: 'Failed to process DOCX file',
+  NO_URL: 'Need to add address for scraping.',
+  NO_CONTENT: 'No content available for summarizing'
+} as const;
 
 // Enhanced logger utility
 const logger = {
@@ -31,31 +44,175 @@ const logger = {
   }
 };
 
+type ScrapedData = {
+  source: 'web' | 'file';
+  address: string;
+  title: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
+};
+
+// Move these component definitions OUTSIDE of ProjectPage
+interface InputFormProps {
+  url: string;
+  loading: boolean;
+  summaryLoading: boolean;
+  onUrlChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onScrape: (e: React.FormEvent) => void;
+  onSummarize: (e: React.FormEvent) => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}
+
+const InputForm: React.FC<InputFormProps> = ({
+  url,
+  loading,
+  summaryLoading,
+  onUrlChange,
+  onScrape,
+  onSummarize,
+  fileInputRef,
+  onFileSelect
+}) => (
+  <Paper sx={{ p: 3, mb: 3 }}>
+    <Stack spacing={2}>
+      <TextField
+        fullWidth
+        label="URL or File Path"
+        value={url}
+        onChange={onUrlChange}
+        disabled={loading}
+        InputProps={{
+          endAdornment: (
+            <InputAdornment position="end">
+              <IconButton
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading}
+              >
+                <FolderOpenIcon />
+              </IconButton>
+            </InputAdornment>
+          ),
+        }}
+      />
+      
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept={CONFIG.SUPPORTED_FILE_TYPES.join(',')}
+        style={{ display: 'none' }}
+        onChange={onFileSelect}
+      />
+
+      <Stack direction="row" spacing={2}>
+        <Button
+          variant="contained"
+          onClick={onScrape}
+          disabled={loading || !url}
+        >
+          {loading ? <CircularProgress size={24} /> : 'Scrape'}
+        </Button>
+        
+        <Button
+          variant="contained"
+          onClick={onSummarize}
+          disabled={summaryLoading || !url}
+        >
+          {summaryLoading ? <CircularProgress size={24} /> : 'Summarize'}
+        </Button>
+      </Stack>
+    </Stack>
+  </Paper>
+);
+
+const ErrorDisplay: React.FC<{ error: string }> = ({ error }) => (
+  <Paper 
+    sx={{ 
+      p: 2, 
+      mb: 2, 
+      bgcolor: 'error.light',
+      color: 'error.contrastText'
+    }}
+  >
+    <Typography variant="body1">
+      Error: {error}
+    </Typography>
+    <Box component="div" sx={{ mt: 1 }}>
+      Please make sure:
+      <ul>
+        <li>The URL starts with http:// or https://</li>
+        <li>The website is accessible</li>
+        <li>The website allows scraping</li>
+      </ul>
+    </Box>
+  </Paper>
+);
+
+const ScrapedContent: React.FC<{ data: ScrapedData }> = ({ data }) => (
+  <Paper sx={{ p: 3, my: 3 }}>
+    <Typography variant="h6" gutterBottom>
+      Scraped Content
+    </Typography>
+    <Box sx={{ mb: 2 }}>
+      <Typography variant="subtitle2">Source: {data.source}</Typography>
+      <Typography variant="subtitle2">Address: {data.address}</Typography>
+      <Typography variant="subtitle2">Title: {data.title}</Typography>
+    </Box>
+    <Typography 
+      sx={{ 
+        whiteSpace: 'pre-wrap',
+        maxHeight: CONFIG.MAX_DISPLAY_HEIGHT,
+        overflow: 'auto'
+      }}
+    >
+      {data.text}
+    </Typography>
+  </Paper>
+);
+
+interface SummaryDisplayProps {
+  summary: string;
+}
+
+const SummaryDisplay: React.FC<SummaryDisplayProps> = ({ summary }) => (
+  <Paper sx={{ p: 3, mb: 3 }}>
+    <Typography variant="h6" gutterBottom>
+      Summary
+    </Typography>
+    <Box sx={{ 
+      maxHeight: CONFIG.MAX_DISPLAY_HEIGHT,
+      overflow: 'auto'
+    }}>
+      <ReactMarkdown>{summary}</ReactMarkdown>
+    </Box>
+  </Paper>
+);
+
 /**
  * ProjectPage Component
  * Handles website scraping and summarization functionality
  * Route: /project/scrapeme
  */
 const ProjectPage: React.FC = () => {
-  // Get the project ID from URL parameters
+  // Group related state
   const { id } = useParams();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // State management for form inputs and API responses
+  // Input states
   const [url, setUrl] = useState('');
   const [source, setSource] = useState<'web' | 'file'>('web');
-  const [loading, setLoading] = useState(false);
-  const [rawScrapedData, setRawScrapedData] = useState<{
-    source: 'web' | 'file';
-    address: string;
-    title: string;
-    text: string;
-    created_at: string;
-    updated_at: string;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [fileObject, setFileObject] = useState<File | null>(null);
+
+  // Data states
+  const [rawScrapedData, setRawScrapedData] = useState<ScrapedData | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
+
+  // UI states
+  const [loading, setLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
 
   // Add component lifecycle logging
   useEffect(() => {
@@ -69,59 +226,55 @@ const ProjectPage: React.FC = () => {
     };
   }, [id, source]);
 
-  // Enhanced file selection handling with logging
+  const processDocxFile = async (file: File): Promise<ScrapedData> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const result = await mammoth.extractRawText({ arrayBuffer });
+    const displayPath = `${CONFIG.UPLOAD_PATH_PREFIX}${file.name}`;
+
+    return {
+      source: 'file' as const,
+      address: displayPath,
+      title: file.name,
+      text: result.value,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  };
+
+  const validateFile = (file: File): boolean => {
+    if (!CONFIG.SUPPORTED_FILE_TYPES.some(type => file.name.endsWith(type))) {
+      setError(UI_MESSAGES.INVALID_FILE);
+      return false;
+    }
+    return true;
+  };
+
+  // Move handleFileSelect definition before it's used
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     logger.info('File selection triggered');
+    setError(null);
     
     const file = e.target.files?.[0];
-    if (!file) {
-      logger.debug('No file selected');
+    if (!file || !validateFile(file)) {
       return;
     }
 
-    logger.info('File selected', { 
-      name: file.name,
-      size: file.size,
-      type: file.type 
-    });
-
+    setFileObject(file);
     setLoading(true);
 
     try {
-      // For .docx files
-      if (file.name.endsWith('.docx')) {
-        const arrayBuffer = await file.arrayBuffer();
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        const content = result.value; // This contains the text content
-
-        logger.info('DOCX file processed', {
-          fileName: file.name,
-          contentLength: content.length
-        });
-
-        setUrl(file.name);
-        setSource('file');
-        
-        const newData = {
-          source: 'file' as const,
-          address: file.name,
-          title: file.name,
-          text: content,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        
-        setRawScrapedData(newData);
-        logger.info('File data processed successfully', {
-          fileName: file.name,
-          dataLength: content.length
-        });
-      } else {
-        setError('Please select a .docx file');
-      }
+      const newData = await processDocxFile(file);
+      setUrl(newData.address);
+      setSource('file');
+      setRawScrapedData(newData);
+      logger.info('File data processed successfully', {
+        fileName: file.name,
+        dataLength: newData.text.length
+      });
     } catch (error) {
       logger.error('Error processing DOCX file', error);
-      setError('Failed to process DOCX file');
+      setError(UI_MESSAGES.PROCESSING_ERROR);
+      setUrl('');
     } finally {
       setLoading(false);
     }
@@ -130,23 +283,11 @@ const ProjectPage: React.FC = () => {
   // Enhanced URL change handler with logging
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    logger.debug('URL input changed', { value });
-    
+    logger.debug('address input changed', { value });
     setUrl(value);
-    
-    if (!value) {
-      logger.info('Input cleared, resetting to web source');
-      setSource('web');
-      setRawScrapedData(null);
-    } else {
-      try {
-        new URL(value);
-        logger.debug('Valid URL detected, setting source to web');
-        setSource('web');
-      } catch {
-        logger.debug('Invalid URL format, maintaining current source');
-      }
-    }
+    setSource('web'); // Reset to web source if cleared
+    setRawScrapedData(null);
+    setError(null); // clear error when user starts typing
   };
 
   // Enhanced scraping handler with detailed logging
@@ -166,36 +307,56 @@ const ProjectPage: React.FC = () => {
     
     setLoading(true);
     setError(null);
-    
+
     try {
-      let data;
+      let response;
+      let newData=null;
       if (source === 'file') {
-        logger.debug('Processing file source');
-        if (!rawScrapedData) {
-          throw new Error('No file content available');
-        }
-        data = rawScrapedData;
-      } else {
-        logger.debug('Processing web source');
-        const urlObject = new URL(url);
-        logger.info('Initiating web scrape', { url: urlObject.href });
+        logger.info('Initiating file scrape. Address: ', { url });
         
-        const response = await websiteService.scrapeWebsite(urlObject.href);
-        data = {
+        // For .docx files
+        if (fileObject && fileObject.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          const arrayBuffer = await fileObject.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          const content = result.value; // This contains the file content
+          logger.info('DOCX file processed', {
+            fileName: fileObject.name,
+            contentLength: content.length
+          });
+
+          newData = {
+            source: 'file' as const,
+            address: fileObject.webkitRelativePath,
+            title: fileObject.name,
+            text: content,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          
+          logger.info('File scraped successfully');
+        } else {
+          setError('Please select a .docx file');
+        }
+       
+      } else if (source === 'web') {
+        logger.info('Initiating web scrape', { url });
+        response = await scrapeService.scrapeWebsite(url);
+        
+        newData = {
           source: 'web' as const,
-          address: urlObject.href,
+          address: url,
           title: response.title,
           text: response.text,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
+
+        logger.info('Web scraped successfully', { response: response });
       }
       
-      setRawScrapedData(data);
-      logger.info('Scrape completed successfully', {
-        source: data.source,
-        contentLength: data.text.length
-      });
+      setRawScrapedData(newData);
+      setUrl(newData ? newData.address : '');
+
     } catch (err) {
       logger.error('Scrape operation failed', err);
       setError(err instanceof Error ? err.message : 'Failed to scrape content');
@@ -237,7 +398,14 @@ const ProjectPage: React.FC = () => {
         source: rawScrapedData.source
       });
       
-      const summaryText = await websiteService.getSummary(rawScrapedData.address, rawScrapedData.source);
+      let summaryText = null;
+      
+      if (rawScrapedData.source === 'file') { 
+        summaryText = await scrapeService.summarize(rawScrapedData.title, rawScrapedData.source, rawScrapedData.text);
+      } else {
+        summaryText = await websiteService.getSummary(rawScrapedData.address, rawScrapedData.source);
+      }
+      
       setSummary(summaryText);
       
       logger.info('Summary generated successfully', {
@@ -262,132 +430,36 @@ const ProjectPage: React.FC = () => {
   // Only render for the 'scrapeme' project
   if (id !== 'scrapeme') return null;
 
+  // Consider adding a fallback or removing this check if not needed
+  if (id !== 'scrapeme') {
+    return (
+      <Container>
+        <Typography>Invalid project ID</Typography>
+      </Container>
+    );
+  }
+
+  // Update the TextField to use the url state
   return (
     <Container sx={{ py: 4 }}>
-      {/* Page Header */}
-      <Typography variant="h2" gutterBottom>
-        ScrapeMe
-      </Typography>
-      <Typography variant="h5" gutterBottom>
-        Website Scraping Project
-      </Typography>
-
-      {/* URL Input Form */}
-      <Paper sx={{ p: 3, my: 3 }}>
-        <form onSubmit={handleScrape}>
-          <TextField
-            fullWidth
-            label={source === 'file' ? "File Path" : "Website URL"}
-            variant="outlined"
-            value={url}
-            onChange={handleUrlChange}
-            placeholder={source === 'file' ? "Selected file..." : "https://example.com"}
-            sx={{ mb: 2 }}
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton
-                    onClick={() => fileInputRef.current?.click()}
-                    edge="end"
-                    title="Open local file"
-                  >
-                    <FolderOpenIcon />
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
-          />
-          {/* Hidden file input */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileSelect}
-            style={{ display: 'none' }}
-            accept=".docx"
-          />
-          <Stack direction="row" spacing={2}>
-            <Button 
-              variant="contained" 
-              onClick={handleScrape}
-              disabled={loading}
-            >
-              {loading ? <CircularProgress size={24} /> : 'Scrape Me'}
-            </Button>
-            <Button
-              variant="contained"
-              onClick={handleSummarize}
-              disabled={summaryLoading}
-            >
-              {summaryLoading ? <CircularProgress size={24} /> : 'Summarize Me'}
-            </Button>
-          </Stack>
-        </form>
-      </Paper>
-
-      {/* Error Display Section */}
-      {error && (
-        <Paper 
-          sx={{ 
-            p: 2, 
-            mb: 2, 
-            bgcolor: 'error.light',
-            color: 'error.contrastText'
-          }}
-        >
-          <Typography variant="body1">
-            Error: {error}
-          </Typography>
-          <Box component="div" sx={{ mt: 1 }}>
-            Please make sure:
-            <ul>
-              <li>The URL starts with http:// or https://</li>
-              <li>The website is accessible</li>
-              <li>The website allows scraping</li>
-            </ul>
-          </Box>
-        </Paper>
-      )}
-
-      {/* AI Summary Display Section */}
-      {summary && (
-        <Paper sx={{ p: 3, my: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Summary
-          </Typography>
-          <Typography
-            sx={{
-              whiteSpace: 'pre-wrap',
-              maxHeight: '400px',
-              overflow: 'auto'
-            }}
-          >
-            <ReactMarkdown>{summary}</ReactMarkdown>
-          </Typography>
-        </Paper>
-      )}
-    
-      {/* Scraped Content Display Section */}
-      {rawScrapedData && (
-        <Paper sx={{ p: 3, my: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Scraped Content
-          </Typography>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2">Source: {rawScrapedData.source}</Typography>
-            <Typography variant="subtitle2">Address: {rawScrapedData.address}</Typography>
-            <Typography variant="subtitle2">Title: {rawScrapedData.title}</Typography>
-          </Box>
-          <Typography 
-            sx={{ 
-              whiteSpace: 'pre-wrap',
-              maxHeight: '400px',
-              overflow: 'auto'
-            }}
-          >
-            {rawScrapedData.text}
-          </Typography>
-        </Paper>
-      )}
+      <Typography variant="h2" gutterBottom>ScrapeMe</Typography>
+      <Typography variant="h5" gutterBottom>Website Scraping Project</Typography>
+  
+      {/* Forms and controls */}
+      <InputForm 
+        url={url} 
+        loading={loading} 
+        summaryLoading={summaryLoading}
+        onUrlChange={handleUrlChange}
+        onScrape={handleScrape}
+        onSummarize={handleSummarize}
+        fileInputRef={fileInputRef}
+        onFileSelect={handleFileSelect}
+      />
+  
+      {error && <ErrorDisplay error={error} />}
+      {summary && <SummaryDisplay summary={summary} />}
+      {rawScrapedData && <ScrapedContent data={rawScrapedData} />}
     </Container>
   );
 };

@@ -9,9 +9,7 @@ logger = logging.getLogger(__name__)
 class OpenAIProvider(BaseLLMProvider):
     def __init__(self):
         self.client = None
-        self.system_prompt = """You are an assistant that analyzes the contents of a website \
-and provides a short summary, ignoring text that might be navigation related. \
-Respond in markdown."""
+
 
     def initialize(self) -> None:
         settings = get_settings()
@@ -19,34 +17,38 @@ Respond in markdown."""
             raise ValueError("OpenAI API key not found")
         self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-    def validate_api_key(self) -> bool:
-        settings = get_settings()
-        api_key = settings.OPENAI_API_KEY
-        return (
-            api_key and 
-            api_key.startswith("sk-") and 
-            api_key.strip() == api_key
-        )
-    
     # See how this function creates exactly the format above
-    def messages_for(self, website_title: str, website_content: str):
+    def messages_for(self, system_prompt: str, user_prompt: str):
         return [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": self._create_user_prompt(website_title, website_content)}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ]
+    
+    def _create_user_prompt(self, title: str, content: str, type: str) -> str:
+        return f"""You are looking at a {type} titled {title}
+The contents of this {type} is as follows; please provide a short summary in markdown.
+If it includes news or announcements, then summarize these too.
 
-    async def generate_summary(self, website_title: str, website_content: str) -> str:
+{content}""" 
+
+    async def generate_summary(self, title: str, content: str, type: str) -> str:
         if not self.client:
             logger.info("Initializing OpenAI client")
             self.initialize()
-            
+
+        system_prompt = """You are an assistant that analyzes the contents of a website \
+and provides a short summary, ignoring text that might be navigation related. \
+Respond in markdown."""
+
+        user_prompt = self._create_user_prompt(title, content, type)
+
         try:
             logger.info("Sending request to OpenAI API")
-            logger.info(f"Content length: {len(website_content)} characters")
+            logger.info(f"Content length: {len(content)} characters")
             
             response = await self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=self.messages_for(website_title, website_content)
+                messages=self.messages_for(system_prompt, user_prompt)
             )
             
             logger.info(f"Response.choices: {response.choices}")
@@ -66,9 +68,3 @@ Respond in markdown."""
             logger.error(f"Unexpected error during summary generation: {str(e)}", exc_info=True)
             raise
 
-    def _create_user_prompt(self, website_title: str, website_content: str) -> str:
-        return f"""You are looking at a website titled {website_title}
-The contents of this website is as follows; please provide a short summary in markdown.
-If it includes news or announcements, then summarize these too.
-
-{website_content}""" 

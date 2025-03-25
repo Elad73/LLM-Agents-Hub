@@ -3,21 +3,6 @@ import { Website } from '../types/Website';
 const API_URL = 'http://localhost:8000/api/projects';
 
 export const websiteService = {
-  async getWebsites(): Promise<Website[]> {
-    const response = await fetch(`${API_URL}/websites`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch websites');
-    }
-    return response.json();
-  },
-
-  async getWebsite(id: string): Promise<Website> {
-    const response = await fetch(`${API_URL}/websites/${id}`);
-    if (!response.ok) {
-      throw new Error('Failed to fetch website');
-    }
-    return response.json();
-  },
 
   scrapeWebsite: async (url: string): Promise<Website> => {
     try {
@@ -51,10 +36,13 @@ export const websiteService = {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
+          title: urlOrContent,
+          source,
           url: urlOrContent,
-          source
+          
         }),
       });
+
 
       if (!response.ok) {
         const errorData = await response.text();

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, HttpUrl
 from .models import Project, WebsiteSummaryRequest, WebsiteSummaryResponse
 from ..core.website import Website
@@ -52,6 +52,12 @@ class WebsiteRequest(BaseModel):
     url: str
     source: str
 
+class SummarizeRequest(BaseModel):
+    title: str
+    source: str
+    content: Optional[str] = None
+    url: Optional[str] = None
+
 class WebsiteSummaryResponse(BaseModel):
     summary: str
 
@@ -86,24 +92,29 @@ async def scrape_website(request: WebsiteRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/summarize", response_model=WebsiteSummaryResponse)
-async def summarize_website(request: WebsiteRequest):
+async def summarize(request: SummarizeRequest):
+    logger.info(f"Received request: {request}")
     start_time = datetime.now()
     
     try:
         if request.source == "file":
+            logger.info(f"Creating File object from content: {request.title}")
             # Create website object from content
-            website = Website.from_content("local_file", request.url)
+           # website = Website.from_content("local_file", request.url)
         else:
             # Create website object from URL
             website = Website(request.url)
 
-        logger.info(f"website: {website}")    
+        logger.info(f"Created object to summarize")    
         # Rest of the summarization logic remains the same
         settings = get_settings()
         logger.info(f"settings: {settings}")
         llm_provider = LLMFactory.create(settings.DEFAULT_LLM_PROVIDER)
         logger.info(f"llm_provider: {llm_provider}")
-        summary = await llm_provider.generate_summary(website.title, website.text)
+        if request.source == "file":
+            summary = await llm_provider.generate_summary(request.title, request.content, request.content)
+        else:
+            summary = await llm_provider.generate_summary(website.title, website.text, request.source)
         logger.info(f"summary: {summary}")
         
         return WebsiteSummaryResponse(summary=summary)
